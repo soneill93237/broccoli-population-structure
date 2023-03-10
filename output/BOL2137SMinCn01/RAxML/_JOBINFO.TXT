@@ -1,0 +1,14 @@
+Task\ label=BOL2137SMinCn00-best-tree-boots_1
+Task\ ID=2576691
+Tool=RAXMLNG_XSEDE
+created\ on=2021-09-19 23:53:23.0
+JobHandle=NGBW-JOB-RAXMLNG_XSEDE-6BE9D079162E4DD1A4CD443780F42629
+RunNumber=1
+resource=expanse
+User\ ID=142778
+User\ Name=soneill93237
+email=so424@cornell.edu
+Output=(raxml_outputfiles,RAXML_*,UNKNOWN,UNKNOWN,UNKNOWN),(all_outputfiles,*,UNKNOWN,UNKNOWN,UNKNOWN)
+ChargeFactor=1.000000
+cores=125
+JOBID=5925676

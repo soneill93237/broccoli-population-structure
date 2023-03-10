@@ -1,0 +1,32 @@
+PLINK v1.90b5.2 64-bit (9 Jan 2018)
+Options in effect:
+  --allow-extra-chr
+  --file BOL2137SMinCn00/PLINK/BOL2137SMinC
+  --make-bed
+  --out BOL2137SMinCn00/PLINK/BOL2137SMinC
+
+Hostname: elaborateTool
+Working directory: /home/sean/PROJECTS/broccoli_gwas
+Start time: Wed Sep 15 00:58:51 2021
+
+Random number seed: 1631681931
+31866 MB RAM detected; reserving 15933 MB for main workspace.
+Scanning .ped file... done.
+Performing single-pass .bed write (18520 variants, 182 people).
+--file: BOL2137SMinCn00/PLINK/BOL2137SMinC-temporary.bed +
+BOL2137SMinCn00/PLINK/BOL2137SMinC-temporary.bim +
+BOL2137SMinCn00/PLINK/BOL2137SMinC-temporary.fam written.
+18520 variants loaded from .bim file.
+182 people (0 males, 0 females, 182 ambiguous) loaded from .fam.
+Ambiguous sex IDs written to BOL2137SMinCn00/PLINK/BOL2137SMinC.nosex .
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 0 founders and 182 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate is 0.893523.
+18520 variants and 182 people pass filters and QC.
+Note: No phenotypes present.
+--make-bed to BOL2137SMinCn00/PLINK/BOL2137SMinC.bed +
+BOL2137SMinCn00/PLINK/BOL2137SMinC.bim + BOL2137SMinCn00/PLINK/BOL2137SMinC.fam
+... done.
+
+End time: Wed Sep 15 00:58:51 2021
