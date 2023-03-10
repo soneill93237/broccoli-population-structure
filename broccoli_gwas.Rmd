@@ -1,0 +1,731 @@
+---
+title: "Broccoli GWAS of Horticultural Quality Traits"
+author: "Zachary Stansell, Sean O'Neill, Thomas Björkman"
+date: '`r format(Sys.Date(), "%d-%b-%Y")`'
+output:
+  html_document:
+    highlight: pygments
+    theme: united
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+  pdf_document:
+    toc: yes
+link-citations: true
+always_allow_html: true
+---
+
+# Setup
+## R setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+source("bin/R/PACKAGES.R") 
+#library("tidyverse")
+```
+##bash setup
+```{bash, eval=FALSE}
+
+#add code here for paths, dependencies, etc
+bin/shell/INSTALL.sh" 
+
+
+```
+
+
+
+# Introduction and Learning 
+
+## Standing Questions
+
+* What's the proper application of nesting (in an experimental design: 2 years, 2 trials/year, 3 reps) **answer**  
+* Should all 4 experiments be analyzed independent or bulked? **answer**  
+* Should multilevel models be used? **probably not**  
+* Should year/trial/rep/genotype be factors (tentative yes) **answer**  
+* What are the dependent and independent variable in this analysis. **answer**  
+* Is it fair to use GWAS with categorical data (e.g., flower color) **no**  
+* What types of data other than continuous are allowed? how are they typically treated? **answer**  
+* Does our sample size (N=97) make sense? what are similar GWAS studies that have used small sample size? **answer**  
+* Is there an issue using REP (compared to year and trial) because... ... ... ... it doesn't .... ....... ... ... ... 
+* Can you show that FOR ALL TRAITS, rep within trait isn't important? 
+	* For now, lets ASSUME that there's no significant rep effect...
+* Why would you normalize data for GWAS? **answer**
+
+**Notes from Feb 2, 2021**
+
+* Population structure-- options available, look at variation autoencoder resolving pop structure more clearly? (currently using TASSEL for PCA and fastSTRUCTURE for population structure-- what about structure using variations autoencoders? what happens?)  
+* Normalization--- read about, 
+
+
+
+
+## Data Exploration
+
+```{r data_exploration_and_learning, eval=FALSE, echo=FALSE, warning=FALSE  }
+# spend time testing the data.. are there any entry errors?
+# are there outliers?
+# make tables e.g., table(pheno$sc) or table(pheno$FC, pheno$geno)
+# make histograms to look for outliers; hist(pheno$BM)
+
+pheno <-
+	read.csv(file = "raw/PHENO/raw/pheno_final.csv",
+					 stringsAsFactors = FALSE,
+					 na.strings = "NA") 
+
+
+# Compare trial years by mean values
+pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4)) %>%
+	group_by(geno, trial) %>%
+	summarize(mean = mean(F50, na.rm = TRUE), .groups = "drop") %>%
+	spread(trial, mean) %>%
+	select(-geno) %>%
+	pairs()
+
+
+
+# select only year 2
+table(test$geno[test$year == 2])
+
+# use tidy to select year two
+
+pheno %>% dplyr::filter(BS > 35)
+
+
+
+subset_data <-
+	pheno[, c(
+		"MT",
+		"FF",
+		"F50",
+		"MF50",
+		"HT",
+		"WD",
+		"BM",
+		"LT",
+		"HM",
+		"HI",
+		"HD",
+		"CL",
+		"BS",
+		"BR",
+		"BU",
+		"HC",
+		"HE",
+		"HS",
+		"HU",
+		"HR",
+		"OQ",
+		"FC"
+	)]
+
+pairs(subset_data)
+
+boxplot(pheno$MT ~ pheno$trial)
+
+
+traits <-c("MT","FF","F50","MF50","HT","WD","BM","LT","HM","HI","HD","CL","BS","BR","BU","HC","HE","HS","HU","HR","OQ","FC")
+
+
+
+pdf("rst/sandbox/shittyboxplot.pdf", height= 20, width=20)
+par(mfcol=c(6,4))
+for (i in traits){
+	boxplot(pheno[,i] ~ pheno$trial, main= i)
+}
+dev.off()
+
+# Compare trial years
+#throw out "trial 0"
+pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4)) %>%
+	group_by(geno, trial) %>%
+	summarize(mean = mean(BR, na.rm = TRUE), .groups = "drop") %>%
+	spread(trial, mean) %>%
+	select(-geno) %>%
+	pairs()
+	
+# 
+temp <- pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4))
+
+lmMod <- lm(MT ~ geno, data=temp)
+
+# initial model
+#Now that the model is ready, there are two ways to test for heteroscedasticity:
+#Graphically Through statistical tests
+#Graphical method
+
+par(mfrow=c(2,2)) 
+# init 4 charts in 1 panel
+plot(lmMod)
+
+
+
+lmMod <- pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4)) %>%
+	lm(. ,HI ~ geno) # initial model
+#Now that the model is ready, there are two ways to test for heteroscedasticity:
+
+#Graphically
+#Through statistical tests
+#Graphical method
+par(mfrow=c(2,2)) # init 4 charts in 1 panel
+plot(lmMod)
+
+# Example of coloring by trial
+pairs(temp[,10:18], pch = 21,bg = c("red", "green3", "blue", "white", "black")[temp$trial])
+
+
+## Stuff we've learned
+* When comparing 2019 trials (1 and 2) with 2020 trials (3 and 4).
+	* 2020 was wider, heavier, a bit earlier. overall, larger in every way.
+	* in fact, head mass was 86% larger and above ground biomass was 96% larger!
+	* There seems to be more laterals (in which year? year 2?)
+	
+	
+## questions
+
+* How do we aggregate the data?
+* Do we summarize by year?
+
+
+## ANOVA,how to aggregate, heteroscedasticity
+*figure out how to pair between trials, reps
+*aggregation possibilities ()
+	*average of reps with each planting
+	*by planting or year
+		*average 1 and 2, 3 and 4
+		*average 1 and 3, 2 and 4
+*q: which aggregations are appropriate?
+	*ANOVA
+	*Look at weather data, population structure.  try to reveal error structure (?)
+	*see how different aggregations affect error, heteroscedasticity
+*q: Which variables should be studied in GWAS
+	*read GWAS to understand conventions, limitations, what makes traits good candidates 
+*q: should any accessions be filtered?
+
+	
+```
+
+```{r pair_by_trial, eval = FALSE}
+# a way of plotting pairs by trial.  note that the number of accessions differs by trial
+# consider writing a function to generalize
+
+trial.sizes <- table(temp$trial);
+big.trial <- which(trial.sizes == max(trial.sizes));
+
+
+```
+
+## Learning ANOVA
+	
+
+```{r models_learning, eval=FALSE}
+
+
+######################
+# here we're inquiring about rep effects.
+# load data
+pheno <- read.csv("raw/PHENO/raw/pheno_final.csv") %>% dplyr::filter(trial != 0)
+
+
+# question.. are the reps different within planting?
+par(mfcol = c(2, 2))
+
+for (i in levels(as.factor(pheno$trial))) {
+	test <- pheno %>% dplyr::filter(trial == i)
+	boxplot(test$WD ~ as.factor(test$rep), main = paste("trial",i), ylim=c(0,200))
+	
+}
+
+
+summary(
+	aov(pheno$MT ~ as.factor(pheno$trial) + as.factor(pheno$rep))
+	)
+
+# For MT (days to maturity) we 'fail to reject the null (H0) that there's no diff between reps)
+
+
+######################
+
+
+
+# select only year 2
+table(test$geno[test$year == 2])
+
+# use tidy to select weird bead sizes:
+pheno %>% 	dplyr::filter(BS > 35)
+
+
+subset_data <-
+	pheno[, c(
+		"MT",
+		"FF",
+		"F50",
+		"MF50",
+		"HT",
+		"WD",
+		"BM",
+		"LT",
+		"HM",
+		"HI",
+		"HD",
+		"CL",
+		"BS",
+		"BR",
+		"BU",
+		"HC",
+		"HE",
+		"HS",
+		"HU",
+		"HR",
+		"OQ",
+		"FC"
+	)]
+pairs(subset_data)
+
+boxplot(pheno$MT ~ pheno$trial)
+
+
+traits <-
+	c(
+		"MT",
+		"FF",
+		"F50",
+		"MF50",
+		"HT",
+		"WD",
+		"BM",
+		"LT",
+		"HM",
+		"HI",
+		"HD",
+		"CL",
+		"BS",
+		"BR",
+		"BU",
+		"HC",
+		"HE",
+		"HS",
+		"HU",
+		"HR",
+		"OQ",
+		"FC"
+	)
+
+
+pdf("rst/sandbox/shittyboxplot.pdf", height= 20, width=20)
+par(mfcol=c(6,4))
+for (i in traits){
+	boxplot(pheno[,i] ~ pheno$trial, main= i)
+}
+dev.off()
+
+# Compare trial years
+#throw out "trial 0"
+pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4)) %>%
+	group_by(geno, trial) %>%
+	summarize(mean = mean(BR, na.rm = TRUE), .groups = "drop") %>%
+	spread(trial, mean) %>%
+	select(-geno) %>%
+	pairs()
+	
+# 
+temp <- pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4))
+
+# initial model
+#Now that the model is ready, there are two ways to test for heterosedasticity:
+#Graphically Through statistical tests
+#Graphical method
+
+par(mfrow=c(2,2)) 
+# init 4 charts in 1 panel
+plot(lmMod)
+
+
+
+lmMod <- pheno %>%
+	dplyr::filter(trial %in% c(1, 2, 3, 4)) %>%
+	lm(. ,HI ~ geno) # initial model
+#Now that the model is ready, there are two ways to test for heterosedasticity:
+
+#Graphically
+#Through statistical tests
+#Graphical method
+par(mfrow=c(2,2)) # init 4 charts in 1 panel
+plot(lmMod)
+
+#Example of coloring by trial
+pairs(temp[,10:18], pch = 21,bg = c("red", "green3", "blue", "white", "black")[temp$trial])
+
+
+# converted year, trial, geno, rep of temp to factors.  was this a good idea
+# spend time learning syntax of formulae
+# installed 
+# install.packages("lmerTest")
+library(lmerTest)
+
+# aov example.
+HT.aov <- aov(HT ~ year:trial, temp)
+
+# apply to all traits, summarize 
+
+# messing with multilevel
+
+#HT.lmer <- lmer(HT ~ geno + (1 | year:trial), data=temp)
+#HT.lmer <- lmer(HT ~ geno + (1 | year:trial:rep), data=temp)
+#HT.lmer <- lmer(HT ~ geno + (rep | year:trial), data=temp) #figure out what random slope means and why this gives an error.
+
+```
+
+
+
+
+
+# Phenotype
+
+## Cleaning data
+
+```{r  Cleaning Data, eval=FALSE}
+source("bin/R/cleaningPhenoData.R") 
+
+```
+
+
+# SNP Calling
+
+
+```{bash, eval=FALSE}
+
+#see notes inside /bin/shell/GB
+
+
+# Configuration. LOTS OF REDUNDANCY UNTIL THIS MAKES SENSE
+
+
+
+##Edit default settings here.
+
+###make a note of where we are.  is this silly?
+HERE=$PWD
+
+### Set working directory for GBS and FILTERING_SNPS
+DIR="/home/$USER/PROJECTS/broccoli_gwas/raw/GBS/"
+
+### create a unique name so that files are not overwritten. For now we will list names of directories in REF_GENOME to iterate through reference genomes
+cd $DIR"REF_GENOME"
+NAME=*
+cd $HERE
+
+### maximum RAM for TASSEL to use.  e.g. "-Xmx25g" for 25gb of RAM.  (ADD SETTINGS FOR MIN AND MAX????)
+MEM="-Xmx25g"
+
+### specify the path to the key
+KEY=$DIR"KEY/masterKey.txt"
+
+### specify where the reference genome(s) is(are) located. 
+REFGENOME=$DIR"REF_GENOME/Brassica_oleracea.BOL.dna.toplevel.fa.gz"
+
+### Set directory with Illumina raw files.
+ILLUMINA=$DIR"ILLUMINA"
+
+### set where the tassel db is located
+DB=$DIR
+
+### where to output results/summary stats from pipeline
+STATS=$DIR  
+
+### path to find the taxa list
+TAXA=$DIR"N109.txt"
+
+###BOL directory
+BOL=$DIR"BOL/"
+
+### where to output final h5 file procuded.
+OUTFILE=$DIR
+
+for i in $NAME
+  do
+    echo i
+    #bin/shell/GBS.sh --DIR=$DIR --NAME=$NAME --MEM=$MEM --KEY=$KEY --REFGENOME=$DIR"REF_GENOME"$i"/"* --ILLUMINA=$ILLUMINA --DB=$DB --STATS=$STATS --OUTFILE=$OUTFILE
+
+    #bin/shell/FILTERING_SNPS.sh --DIR=$DIR --NAME=$NAME --MEM=$MEM --TAXA=$TAXA --BOL=$BOL --OUTFILE=$OUTFILE
+  done
+
+#GOAL IS TO MAKE A FLEXIBLE PIPELINE THAT PRODUCES A FILTERED .h5 FILE NO MATTER WHAT WE FEED IT
+
+```
+
+
+
+
+
+
+# GWAS
+
+## Transforming Data
+
+```{r GWAS, eval=FALSE}
+source("bin/R/normalizingFun.R")
+
+PSP <- read.csv("raw/PHENO/raw/PSP.csv")
+
+
+gwasTraits <- c(
+		"gbs",
+    "HT",
+    "WD",
+    "HE",
+    "LT",
+    "BM",
+    "HM",
+    "HI",
+    "BS",
+    "BU",
+    "HC",
+    "HD",
+    "CL",
+    #"RR",
+    "BR",
+    "HS",
+    "HU",
+    "HR",
+    "OQ",
+    # note, when only using F1, all flower color is the same
+    #"FC", 
+    "MT",
+    "FF",
+    "F50",
+    "MF50" #,
+    # "PC1",
+    # "PC2",
+    # "PC3"
+  )
+
+
+# Normalize ALL data
+# gwasNN.ALL == gwas phenotypes, not normalized, all taxon
+gwasNN.ALL <-  PSP  %>% 
+  #filter(Type %in% "F1") %>% 
+  dplyr::select(gwasTraits)
+
+
+
+
+#Make a table appropriate for TASSEL GUI:
+gwasNN.ALL <-
+	rbind(c("taxa", rep("data", dim(gwasNN.ALL)[2] - 1)),
+				colnames(gwasNN.ALL),
+				as.matrix(gwasNN.ALL))
+
+colnames(gwasNN.ALL) <-
+ 	c("<Phenotype>", rep("", dim(gwasNN.ALL)[2] - 1))
+
+write.table(
+	gwasNN.ALL,
+	"raw/PHENO/normalization/gwasNN.ALL.txt",
+	quote = FALSE,
+	row.names = FALSE,
+	sep = "\t"
+)
+
+
+
+
+# Normalize data using power functions
+
+
+n1 <- lapply(gwasNN.ALL[-1],normalizingFun)
+n2 <- as.data.frame(sapply(n1, `[`))
+
+
+gwasNorm.ALL <- cbind(gwasNN.ALL$gbs, n2)
+colnames(gwasNorm.ALL)[1] <- "gbs"
+
+# write data
+write.table(
+	gwasNorm.ALL,
+	"../OUTPUT/GWAS/pheno_gwas_ALL.txt",
+	sep = "\t" ,
+	quote = FALSE,
+	row.names = FALSE
+)
+
+# Normalize F1 data   
+gwasNN.F1 <-  PSP  %>% 
+  filter(subpop %in% "Calabrese.F1") %>% 
+  dplyr::select(gwasTraits)
+
+n1 <- lapply(gwasNN.F1[-1],normalizingFun)
+n2 <- as.data.frame(sapply(n1, `[`))
+gwasNorm.F1 <- cbind(gwasNN.F1$gbs, n2)
+colnames(gwasNorm.F1)[1] <- "gbs"
+
+# write data
+write.table(gwasNorm.F1,"../OUTPUT/GWAS/pheno_gwas_F1.txt", sep = "\t" , quote=FALSE, row.names = FALSE)
+
+# Normalize LR data
+gwasNN.LR <-  PSP  %>% 
+  filter(subpop %in% c("Calabrese.LR","Sprouting.Broccoli","Violet.Caul")) %>% 
+  dplyr::select(gwasTraits)
+
+n1 <- lapply(gwasNN.LR[-1],normalizingFun)
+n2 <- as.data.frame(sapply(n1, `[`))
+gwasNorm.LR <- cbind(gwasNN.LR$gbs, n2)
+colnames(gwasNorm.LR)[1] <- "gbs"
+
+# write data
+write.table(gwasNorm.LR,"../OUTPUT/GWAS/pheno_gwas_LR.txt", sep = "\t" , quote=FALSE, row.names = FALSE)
+
+
+#QQ plots
+
+gwasListNN <-
+	list(gwasNN.ALL = gwasNN.ALL,
+			 gwasNN.F1 = gwasNN.F1,
+			 gwasNN.LR = gwasNN.LR)
+
+
+gwasListNorm <-
+	list(
+		gwasNorm.ALL = gwasNorm.ALL,
+		gwasNorm.F1 = gwasNorm.F1,
+		gwasNorm.LR = gwasNorm.LR
+	)
+
+#choose data
+for (j in 1:3) {
+  gwasNN <- as.data.frame(gwasListNN[j])
+  gwasNorm <- as.data.frame(gwasListNorm[j])
+# make plots loop  
+ pdf(
+    paste("../OUTPUT/GWAS/qqPlot/", names(gwasNN)[j], ".pdf"),
+    height = 50,
+    width = 6
+  )
+  par(mfrow = c(22, 2), mar = c(1.75, 2, 1.4, 1))
+  
+  
+  for (i in 1:25) {
+    #qq of non-normalized results
+    qqPlot(
+      gwasNN[, i + 1],
+      main = colnames(gwasNN[i + 1]),
+      xlab = "",
+      ylab = "" ,
+      col = alpha(viridis(7)[j], .75),
+      pch = 19,
+      cex = 1,
+      col.lines = alpha(viridis(7)[j], 0.5),
+      id = FALSE
+    )
+    text(-1.75, max(gwasNN[, i + 1], na.rm = TRUE),
+         paste("p = ", round(shapiro.test(gwasNN[, i + 1])$p.value, 3)), font =
+           2)
+    
+    #qq of normalized results
+    qqPlot(
+      gwasNorm[, i + 1],
+      main = colnames(gwasNN[i + 1]),
+      xlab = "",
+      ylab = "" ,
+      col = alpha(viridis(7)[j*2], .75),
+      pch = 19,
+      cex = 1,
+      col.lines = alpha(viridis(7)[j*2], 0.5),
+      id = FALSE
+    )
+    text(-1.75,
+         max(gwasNorm[, i + 1], na.rm = TRUE),
+         paste("p = ", round(shapiro.test(gwasNorm[, i + 1])$p.value, 3)),
+         font = 2)
+    LAMDA <- powerTransform(gwasNN[, i + 1], family = "yjPower")
+    text(
+      -1.75,
+      0.95 * max(gwasNorm[, i + 1], na.rm = TRUE),
+      ifelse(
+        shapiro.test(gwasNN[, i + 1])$p.value > 0.05,
+        "dist is normal",
+        paste("lamda = ", round(LAMDA$lambda, 2))
+      )
+    )
+  }
+  dev.off()
+}
+
+
+# Make GWAS phenotype data, eval=FALSE}
+
+pheno <- read.table("../OUTPUT/GWAS/pheno_gwas_ALL.txt", head = TRUE )
+columbz <-c("taxa",rep("data",dim(pheno)[2]-1))
+test <- rbind(columbz,colnames(pheno), as.matrix(pheno))
+colnames(test) <- c("<Phenotype>",rep("",dim(test)[2]-1))
+write.table(test,"../OUTPUT/GWAS/pheno_gwas_normalized_ALL.txt", quote=FALSE, row.names=FALSE, sep="\t" )
+
+pheno <- read.table("../OUTPUT/GWAS/pheno_gwas_F1.txt", head = TRUE )
+columbz <-c("taxa",rep("data",dim(pheno)[2]-1))
+test <- rbind(columbz,colnames(pheno), as.matrix(pheno))
+colnames(test) <- c("<Phenotype>",rep("",dim(test)[2]-1))
+write.table(test,"../OUTPUT/GWAS/pheno_gwas_normalized_F1.txt", quote=FALSE, row.names=FALSE, sep="\t" )
+
+pheno <- read.table("../OUTPUT/GWAS/pheno_gwas_LR.txt", head = TRUE )
+columbz <-c("taxa",rep("data",dim(pheno)[2]-1))
+test <- rbind(columbz,colnames(pheno), as.matrix(pheno))
+colnames(test) <- c("<Phenotype>",rep("",dim(test)[2]-1))
+write.table(test,"../OUTPUT/GWAS/pheno_gwas_normalized_LR.txt", quote=FALSE, row.names=FALSE, sep="\t" )
+
+rm(list=ls())
+```
+
+
+
+## Run Tassel
+```{bash TASSEL GLM, eval=FALSE}
+
+bin/shell/GWAS.sh
+
+```
+
+
+
+
+## Plot Data
+```{r plot GWAS results, eval=FALSE}
+source("bin/R/manhattan.R")
+
+GLM <-
+	read.delim("rst/sandbox/GLM_ALL1.txt",
+						 sep = "\t",
+						 na.strings = "NaN")
+
+GLM_PCA <-
+	read.delim("rst/sandbox/GLM_ALL_PCA1.txt",
+						 sep = "\t",
+						 na.strings = "NaN")
+
+
+# MLM_PCA_K <- read.delim("../OUTPUT/GWAS/CLI/MLM_PCA_K23.txt", sep="\t", na.strings = "NaN")
+# names(MLM_PCA_K)[names(MLM_PCA_K) == "Locus"] <- "Chr"
+# MLM_Q_K <- read.delim("../OUTPUT/GWAS/CLI/MLM_Q_K23.txt", sep="\t", na.strings = "NaN")
+
+
+
+# 
+# names(MLM_Q_K)[names(MLM_Q_K) == "Locus"] <- "Chr"
+# #temp fix for some p values == 0? idk why
+# MLM_Q_K <- na.omit(MLM_Q_K)
+# MLM_Q_K[MLM_Q_K$p == 0,] <- 1e-16
+
+
+plotGWAS(GLM,  filename="rst/sandbox/GLM.png", res=300)
+plotGWAS(GLM_PCA,  filename="rst/sandbox/GLM_PCA.png", res=300)
+
+
+
+
+# plotGWAS(MLM_PCA_K,  filename="../OUTPUT/GWAS/MLM_PCA_K.png", res=150)
+# plotGWAS(MLM_Q_K,  filename="../OUTPUT/GWAS/MLM_Q_K.png", res=150)
+```

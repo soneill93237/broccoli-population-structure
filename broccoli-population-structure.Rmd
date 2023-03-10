@@ -1,0 +1,1054 @@
+---
+title: "broccoli-population-structure"
+author: "Sean O'Neill"
+date: "8/2/2021"
+output: html_document
+   html_document:
+     title: "TEST"
+     highlight: pygments
+     theme: united
+     toc: yes
+     toc_float:
+       collapsed: yes
+       smooth_scroll: yes
+   pdf_document:
+     toc: yes
+ ---
+```{css, echo=FALSE, eval=FALSE}
+# experimental. for wider
+body .main-container {
+  max-width: 1440px !important;
+  width: 1440px !important;
+  }
+  body {
+    max-width: 1440px !important;
+  }
+```
+
+```{r clear environment, eval=FALSE}
+rm(list=ls())
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Change this to the data directory
+treatmentDIR <- "output/BOL2137SMinCn01"
+
+package.list <- c(
+  "ape",
+  "crosstalk",
+  "dplyr",
+  "DT",
+  "GGally",
+  "ggalt",
+  "ggforce",
+  "ggplot2",
+  "ggtree",
+  "gridExtra",
+  "knitr",
+  "label.switching",
+  "magick",
+  "magrittr",
+  "permute",
+  "phytools",
+  "plotly",
+  "pophelper",
+  "qqman",
+  "remotes",
+  "reshape2",
+  #"rTASSEL",  #this requires rjava, which hasn't worked recently.
+  "shiny",
+  "tidyr",
+  "tidytree",
+  "treeio"
+
+)
+for(pkg in package.list){
+  print(pkg)
+  library(pkg, character.only = TRUE)
+}
+
+# lapply(
+#   package.list,
+#   library,
+#   character.only = TRUE
+# )
+#Sys.getenv()
+knitr::opts_knit$set(root.dir = treatmentDIR)
+```
+
+```{bash rename taxa labels, echo=FALSE, eval=FALSE}
+#this replaces some file names but does not add anything to the R environment. run it once.
+#rework replacement system eventually
+echo $PWD
+export TAXA=$(cat *"-filter.txt"|grep "TAXA"*)
+export TAXA=$(echo -e ${TAXA#"TAXA=raw/GBS/"})
+echo $TAXA
+sed -f ../../replacement-patterns/FULLtoBNUM_NAME.csv "taxa/"$TAXA > taxa/taxaBNUM_NAME.txt
+```
+
+```{r setup taxa names, eval=TRUE}
+#get all the names
+#taxalabels <- read.delim("taxa/taxaBNUM_NAME.txt", header=F, stringsAsFactors=F, row.names = NULL)$V1
+mastertaxa <- sort(read.delim(paste("../../", "masterKey.txt",sep=""), header=T, stringsAsFactors=F, row.names = NULL)$FullSampleName)
+mastercodes <- sub("_.*","",mastertaxa)
+mastershortlabels <- make.names(as.character(sub("[^_]*.[^_]*.[^_]*.","",mastertaxa)), unique = T)
+#oldraxml <- paste(mastercodes, "_", sprintf("%03d",1:length(fullnames)), sep="")
+masternames <- data.frame(mastertaxa=mastertaxa, mastercodes=mastercodes, mastershortlabels=mastershortlabels)
+
+treatment <- read.delim(list.files(pattern="treatment.txt")[1], header=T, stringsAsFactors=F, row.names = NULL)
+fullnames <- read.delim(paste("taxa/", basename(treatment$TAXA),sep=""), header=F, stringsAsFactors=F, row.names = NULL)$V1
+taxacodes <- sub("_.*","",fullnames)
+oldraxml <- paste(mastercodes, "_", sprintf("%03d",1:length(fullnames)), sep="")
+#be carefull with make.names().  It will put "X" at the beginning of names that start with a number (and in other cases where the name fails)
+shortlabels <- make.names(as.character(sub("[^_]*.[^_]*.[^_]*.","",fullnames)), unique = T)
+taxalabels <- paste(taxacodes, "_", shortlabels, sep="")
+taxanumbers <- sprintf("%06d",1:length(fullnames))
+```
+
+```{r setup colors, eval=TRUE, echo=TRUE}
+#make some colors.   http://vrl.cs.brown.edu/color
+clist <- list(
+  colors00 = c("#fd00fe", "#62ce75", "#473c85", "#24a5f7", "#9a1073", "#4ad9e1", "#284e37", "#cad7d4", "#723521", "#fea53b", "#c00018", "#f7b5be", "#788c3b", "#5920af", "#eb74c3", "#6975fe", "#238910", "#528e8c", "#65f112", "#a57784", "#b3e61c", "#ae56ff", "#d6c951", "#ff7074"),
+  
+  colors01 = c("#fd00fe", "#fd00fe", "#62ce75", "#473c85", "#24a5f7", "#9a1073", "#4ad9e1", "#284e37", "#cad7d4", "#723521", "#fea53b", "#c00018", "#f7b5be", "#788c3b", "#5920af", "#eb74c3", "#6975fe", "#238910", "#528e8c", "#65f112", "#a57784", "#b3e61c", "#ae56ff", "#d6c951"),
+  
+  colors02 = c("#fd00fe", "#84bc04", "#1f3e9e", "#e775cc", "#46ebdc", "#256b33", "#82d1f4", "#7c28a4", "#2af385", "#214a65", "#aaa4e1", "#a1085c", "#148fae", "#cadba5", "#943112", "#fa8d80", "#604020", "#f1d438", "#eb1138", "#f7931e", "#270fe2", "#a07d62")
+) 
+# add length of palettes
+lengths <- sapply(clist,length)
+names(clist) <- paste0(names(clist),"_",lengths)
+gclist <- clist$colors01_24
+# par(mar=c(0.2,6,0.2,0))
+# par(mfrow=c(length(clist),1))
+# 
+# #for some reason, barplot() doesn't work in .Rmd
+# for(i in 1:length(clist))
+# {
+#   {barplot(rep(1,max(lengths)),col=c(clist[[i]],rep("white",max(lengths)-length(clist[[i]]))),axes=F,border=F)
+#   text(x=-0.1,y=0.5,adj=1,label=names(clist)[i],xpd=T,cex=1.2)}
+# }
+```
+
+```{bash rename taxa for RAxML, echo=FALSE, eval=FALSE}
+
+#Another bash script to run once per treatment.
+#rework replacement system eventually
+
+export MEM=$(cat *"-filter.txt"|grep "MEM="*)
+export MEM=$(echo -e ${MEM#"MEM="})
+export OUT_NAME=$(cat *"-filter.txt"|grep "OUT_NAME="*)
+export OUT_NAME=$(echo -e ${OUT_NAME#"OUT_NAME="})
+echo $MEM
+echo $OUT_NAME
+echo $PWD
+
+#RAxML requires interleaved phylip files.  The renaming (sed commands) is required because TASSEL truncates names and results in duplicate names.
+
+#make phylip from renamed 16k file (the one i made for PLINK)
+sed -f ../../replacement-patterns/FULLtoBNUM_IND.csv "VCF/"$OUT_NAME"16K.vcf" > "VCF/"$OUT_NAME"16KBNUM_IND.vcf"
+/home/$USER/TASSEL5/run_pipeline.pl $MEM -importGuess "VCF/"$OUT_NAME"16KBNUM_IND.vcf" -export "PHY/"$OUT_NAME"16KBNUM_IND" -exportType "Phylip_Inter"
+#make phylip from renamed .hmp.txt (pre-PLINK)
+sed -f ../../replacement-patterns/FULLtoBNUM_IND.csv "HMP/"$OUT_NAME".hmp.txt" > "HMP/"$OUT_NAME"BNUM_IND.hmp.txt"
+/home/$USER/TASSEL5/run_pipeline.pl $MEM -importGuess "HMP/"$OUT_NAME"BNUM_IND.hmp.txt" -export "PHY/"$OUT_NAME"BNUM_IND" -exportType "Phylip_Inter"
+
+```
+
+```{bash RAxML CRA, echo=FALSE, eval=FALSE}
+# figure this out and then rewrite it in the GBS-analysis
+
+export USER=soneill93237rest
+export URL=https://cipresrest.sdsc.edu/cipresrest/v1
+export PASSWORD=aGs2v9Fr42v3GH3
+export KEY=RAxML_tree-E2EB8FEB8F4B4F37AC3B5BEC3EBA5C0F
+export INPUT=
+
+$ curl -u $USER:$PASSWORD \
+  -H cipres-appkey:$KEY \
+  $URL/job/$USER \
+  -F tool=RAXMLNG_XSEDE \
+  -F input.infile_= $INPUT \
+  
+
+```
+
+```{bash rename tree labels, echo=FALSE, eval=FALSE}
+#rework replacement system
+sed -f ../../replacement-patterns/NAME_INDtoBNUM_NAME.csv RAxML/*"raxml.supportFBP" > RAxML/raxml.tree
+```
+
+```{r rename tree labels after RAxML, echo=FALSE, eval=FALSE}
+RAxML.output.name <- paste("RAxML/", list.files("RAxML", pattern = "*supportFBP"),sep="")
+RAxML.output <- readChar(RAxML.output.name, file.info(RAxML.output.name)$size)
+#RAxML/*"raxml.supportFBP"
+```
+
+## Phylogenetic Trees
+```{r setup/fix names for tree}
+#this used to be in the block below and might belong there.  RUN THIS BEFORE MAKING TREES
+fixednames <- c()
+tree1 <- read.newick("RAxML/raxml.tree", node.label = 'support')
+tree1azlab <- sort.int(tree1@phylo[["tip.label"]], index.return = TRUE)
+#fixednames[tree1azlab$ix] <- taxalabels
+
+fixednames[tree1azlab$ix] <- make.names(order$labels[match(taxalabels, order$taxa)], unique = TRUE)
+tree1@phylo[["tip.label"]][1:182] <- fixednames
+gclist
+#below might be trash but was involved with fixing the names.  The problem was that two sets names that were modified make all unique in different ways so the bar plots (facet_widths) didn't show up for a few of the taxa.
+
+#fixnames <- make.names(get_taxa_name(ladderize(tree1)), unique = TRUE)
+#fixnames[which((fixnames %in% row.names(flist$BOL2137SMinC.10))==FALSE)] <- row.names(flist$BOL2137SMinC.10)[which((fixnames %in% row.names(flist$BOL2137SMinC.10))==FALSE)]
+#the next two lines are a hack needed because the raxml file was made before a change to the overall naming structure
+#orderhack <- read.delim("order.groups.csv")$taxa
+#fixkey <- data.frame(a=)
+#tree1 <- rename_taxa(tree = tree1, data = fixnames)
+```
+
+```{r ggtree sandbox, eval=FALSE}
+#tree3 <- read.tree(text='((A:1,B:2):3,C:2):1;')
+#ggtree(tree3) + geom_tiplab() + geom_rootedge()
+tree2 <-read.tree(text='((Q:1,W:2):5,(E:2,(R:1,T:1):1):2):1;')
+#tree2 <-read.tree(text='((A:1,B:2):3,C:2):1;')
+tree2.plot <-
+  ggtree(
+    tree2,
+    layout = 'slanted',
+    #branch.length = 'none',
+    #ladderize = TRUE,
+    right = TRUE
+  ) +
+  
+  #coord_flip() +
+  #scale_y_reverse()
+  #layout_dendrogram() +
+  #geom_tree() +
+  #geom_tiplab(size = 6, hjust = 0) +
+  theme_tree() +
+  geom_tiplab()
+#tree2.plot
+
+#figure out how to line up text with edge
+tree2.plot
+ggsave(
+  ".png",
+  plot = tree1.plot,
+  units = "cm",
+  width = 20,
+  height = 30,
+  dpi = 300
+)
+#knitr::include_graphics(".png")
+```
+
+###TREES-1-ggtree-rectangular
+```{r ggtree, eval=FALSE}
+order <- read.delim("order.groups.csv")
+
+#These are the old label names
+outgroup1 <- c(
+  "W001_W001_WT_A",
+  "W006_W006_WT",
+  "W005_W005_WT",
+  "W004_W004_WT",
+  "W002_W002_WT",
+  "W003_W003_WT"
+)
+#use these for new, more concise label names
+outgroup2 <- c(
+  "B_insularis",
+  "B_macrocarpa",
+  "B_cretica",
+  "B_incana_02",
+  "B_incana_03",
+  "B_incana_01"
+)
+
+group.roots.1 <- c(184,193,200,206,354,209,212,216,220,222,347,346,329,327,317,313,234,246)
+group.colors.1 <- gclist[1:length(group.roots)]
+group.expand.1 <- c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)#rep(0.01,length(group.roots))
+group.spread.1 <- rep(5,length(group.roots))
+group.spread.1[1] <- 0
+group.labels.1 <- c("1: Crop Wild Relatives","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18: Hybrid Broccoli")
+g1 <- data.frame(gnode = group.roots.1, gfill = group.colors.1, gexpand = group.expand.1, gspread = group.spread.1, glabel = group.labels.1)
+
+tree1wildroot <-
+    root(tree1,
+         outgroup = outgroup2,
+         edgelabel = TRUE
+         )
+d <- data.frame(label = tree1@phylo$tip.label, 
+                newlabel1 = label_pad(tree1@phylo$tip.label, pad = " ", justify = "right"),
+                newlabel2 = label_pad(tree1@phylo$tip.label, pad = "-"),
+                newlabel3 = label_pad(order$labels, pad = "-")
+)  
+tree1fw <- ggtree(
+    tree1wildroot,
+    layout = 'ellipse',
+    branch.length = "none",
+    ladderize = TRUE,
+    right = TRUE
+  ) %<+% d 
+
+  #xlim(NA, 10) +
+  # geom_point2(
+  #   mapping = aes(
+  #     subset=!isTip & !is.na(as.numeric(support)),
+  #     fill=cut(support, c(0, 33, 66, 100))), 
+  #   shape=21, 
+  #   size=1
+  #  )
+  # geom_label2(
+  #   mapping = aes(
+  #     label = label,
+  #     subset = !is.na(as.numeric(label)) &
+  #       as.numeric(label) > 0
+  #   ),
+  #   #label.size = .125,
+  #   size = 1,
+  #   check_overlap = TRUE
+  # )
+group.roots.parents.1 <- parent(tree1,group.roots.1)
+#I think I separated this section because the "ggtree()" step can take a long time with certain parameters. 
+tree1fw.1 <- tree1fw +
+  #geom_text2(aes(label = group.labels.1, subset = node %in% group.roots.parents.1)) +
+  #geom_text(mapping = aes(label=tree1wildroot[["node.label"]]),size=2, check_overlap = TRUE) +
+  #geom_text(size=1) +
+  #geom_hilight(data=ghilight.1, mapping=aes(node=node, fill=fill), type="roundrect", alpha=1, to.bottom = TRUE ) +
+  #coord_flip() +
+  #scale_y_reverse()
+  #layout_dendrogram() +
+  #geom_tree() +
+  geom_tiplab(
+    aes(label = newlabel2),
+    align = F,
+    family = 'sans',
+    size = 1,
+    #hjust = 0,
+    linetype = "solid",
+    linesize = .125
+  ) +
+  lapply(seq(nrow(g1)), function(i) {
+    geom_point2(
+      node = g1$gnode[i],
+      alpha = 1,
+      fill = g1$gfill[i],
+      expand = g1$gexpand[i],
+      spread = g1$gspread[i],
+      type = "encircle",
+      to.bottom = TRUE
+    )
+  })
+  # geom_label2(
+  #   mapping = aes(
+  #     label = glabel,
+  #     subset = node %in% group.roots.1
+  #   ),
+  #   #label.size = .125,
+  #   size = 1,
+  #   check_overlap = TRUE
+  # )
+
+  # geom_text2(aes(label = glabel))
+  # geom_point2(
+  #   mapping = aes(
+  #     subset = !isTip & !is.na(as.numeric(support)),
+  #     fill = cut(support, c(0, 70, 85, 100)),
+  #     stroke = 0
+  #   ),
+  #   shape = 21,
+  #   size = 1.5
+  # ) +
+  # scale_fill_manual(
+  #   values = c("Red", "Green", "Blue"),
+  #   guide = 'legend',
+  #   name = 'Bootstrap\nPercentage'
+  # )
+  #theme_tree(plot.margin=margin(0, 0, 0, 0))
+  # theme_tree() +
+  # scale_fill_manual(
+  #   values = c("Red", "Green", "Blue"),
+  #   guide = 'legend',
+  #   name = 'Bootstrap Percentage'
+  #   breaks = c('(900,1e+03]', '(700,900]', '(0,700]'),
+  #   labels = expression(BP >= 90, 70 <= BP * " < 90", BP < 70)
+  # )
+
+tree1fw.1 
+#figure out how to line up text with edge
+
+# ggsave(
+#   ".png",
+#   plot = tree1.plot,
+#   units = "cm",
+#   width = 20,
+#   height = 30,
+#   dpi = 300
+# )
+#knitr::include_graphics(".png")
+```
+###TREES-2-ggtree-unrooted
+```{r ggtree-unrooted, eval=FALSE}
+order <- read.delim("order.groups.csv")
+
+#ancestor()
+group.roots <- c(184,193,200,206,354,209,212,216,220,222,347,346,329,327,317,313,234,246)
+group.colors <- gclist[1:length(group.roots)]
+group.expand <- c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)#rep(0.01,length(group.roots))
+group.spread <- rep(5,length(group.roots))
+group.spread[1] <- 0
+group.labels <- c("1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18")
+#group.labels.angles <- 
+g <- data.frame(gnode = group.roots, gfill = group.colors, gexpand = group.expand, gspread = group.spread, glabel = group.labels)
+
+tree1unrooted <- ggtree(root(tree1, node = 192), layout = 'daylight')
+#branch.length = "branch.length",
+#branch.length = tree1[["edge.length"]],
+#ladderize = FALSE,
+#right = TRUE)
+
+tree1unrooted2 <- 
+tree1unrooted + 
+  # geom_hilight(
+  #   data = g,
+  #   mapping = aes(node = gnode, fill = gfill),
+  #   alpha = 1,
+  #   type='roundrect',
+  #   to.bottom = TRUE
+  # )  
+ # geom_label(aes(label = node))
+ geom_point2(
+   mapping = aes(
+     subset = !isTip & !is.na(as.numeric(support)),
+     fill = cut(support, c(0, 33, 66, 100)),
+     stroke = 0
+   ),
+   shape = 21,
+   size = 1.5
+ ) +
+ scale_fill_manual(
+   values = c("Red", "Green", "Blue"),
+   guide = 'legend',
+   name = 'Bootstrap\nPercentage'
+ )
+#tree1unrooted #+ 
+  # lapply(seq(nrow(g)), function(i) {
+  #   geom_hilight(
+  #     node = g$gnode[i],
+  #     alpha = 0,
+  #     fill = g$gfill[i],
+  #     expand = g$gexpand[i],
+  #     spread = g$gspread[i],
+  #     type = "encircle",
+  #     to.bottom = TRUE
+  #   )
+  # }) +
+  # lapply(seq(nrow(g)), function(i) {
+  #   geom_cladelabel(
+  #     node = g$gnode[i],
+  #     label = g$glabel[i],
+  #     geom = 'label'
+  #   ) 
+  # })
+
+# 
+#   geom_label(aes(label = label))
+#   geom_point2(
+#     mapping = aes(
+#       subset = !isTip & !is.na(as.numeric(support)),
+#       fill = cut(support, c(0, 33, 66, 100)),
+#       stroke = 0
+#     ),
+#     shape = 21,
+#     size = 1.5
+#   ) +
+#   scale_fill_manual(
+#     values = c("Red", "Yellow", "Green"),
+#     guide = 'legend',
+#     name = 'Bootstrap\nPercentage'
+#   )
+# 
+
+# tree1unrooted2 <- tree1unrooted2 + geom_hilight(data=ghilite, node=193,mapping = aes(fill="#fd00fe"), alpha=1, to.bottom = TRUE)
+# tree1unrooted2
+
+#figure out how to line up text with edge
+
+# ggsave(
+#   ".png",
+#   plot = tree1.plot,
+#   units = "cm",
+#   width = 20,
+#   height = 30,
+#   dpi = 300
+# )
+#knitr::include_graphics(".png")
+tree1unrooted
+ggsave(
+  "tree-unrooted.pdf",
+  plot = tree1unrooted +
+    # geom_hilight(
+    #   data = g,
+    #   mapping = aes(node = gnode, fill = gfill),
+    #   alpha = 1,
+    #   type='roundrect',
+    #   to.bottom = TRUE
+    # )
+    # geom_label(aes(label = node))
+    geom_point2(
+      mapping = aes(
+        subset = !isTip & !is.na(as.numeric(support)),
+        fill = cut(support, c(0, 33, 66, 100)),
+        stroke = 0
+      ),
+      shape = 21,
+      size = 1.5
+    ) +
+    scale_fill_manual(
+      values = c("Red", "Green", "Blue"),
+      guide = 'legend',
+      name = 'Bootstrap\nPercentage'
+    ),
+  units = "in",
+  width = 3,
+  height = 2,
+  dpi = 300
+)
+```
+
+```{r ape tree, eval=FALSE}
+
+#source('scripts/rename-taxa.sh --infile="BOL21afZAXA00/RAxML/outraxml.raxml.supportFBP" --outfile="BOL21afZAXA00/RAxML/raxml.tree" --repfile="replaceNEWtoOLD.csv"')
+#setwd("BOL21afZAXA00/")
+
+out.group <-
+  c(
+    "W001_W001_WT_A",
+    "W006_W006_WT",
+    "W005_W005_WT",
+    "W004_W004_WT",
+    "W002_W002_WT",
+    "W003_W003_WT"
+  )
+
+tree <- read.tree(file="RAxML/raxml.tree") -> uniqtree
+tree$tip.label <- make.names(tree$tip.label, unique = T)
+tree <- root(tree, outgroup = out.group)
+tree <- ladderize(tree)
+
+temp <-plot(tree,node.pos=1, font=1, align.tip.label=TRUE ,plot=FALSE)
+
+is_tip <- tree$edge[,2] <= length(tree$tip.label)
+ordered_tips <- tree$edge[is_tip, 2]
+write.csv(tree$tip.label[rev(ordered_tips)], file="order.csv", row.names=FALSE)
+
+# # Tree for popstructure
+# svg("image/raxml.tree.svg", height = 35, width=20, pointsize = 10)
+# par(oma=c(0,0,0,10))
+# plot(tree,node.pos=1, font=1, align.tip.label=TRUE, cex=1.5, edge.width=4, no.margin=TRUE,  label.offset = 0.01 )
+# dev.off()
+
+tree.file <- "../../raxml.tree_delete1.png"
+png(tree.file, units = "cm",  height = 30, width=10, pointsize = 1, res = 300)
+
+# tree.file <- "images/raxml.tree_delete.svg"
+# svg(tree.file, height = 25, width=14, pointsize = 10)
+
+par(oma=c(0,0,0,0))
+treeplot1 <-
+  plot(
+    tree,
+    node.pos = 1,
+    type = "phylogram",
+    font = 1,
+    show.tip.label = T,
+    align.tip.label = 2,
+    cex = 4,
+    edge.width = 2,
+    no.margin = T,
+    label.offset = 0,
+    direction = "rightwards",
+    adj = 0
+  )
+tree.labels <- tree$node.label
+tree.labels[as.integer(tree.labels) > 50] <- "" 
+#node.indices <- which(as.integer(tree.labels)<50)
+#tree.labels <- as.character(tree.labels)
+#tiplabels(text=tree$tip.label, frame = "rect", adj=0)
+nodelabels(tree.labels, frame = "none", cex=2, col = rgb(0,0,0))
+dev.off()  
+
+knitr::include_graphics(tree.file)
+
+```
+
+## PCA-PLOTS
+```{r PCA setup, eval=FALSE}
+```
+### PCA-plots-1-ggplot2
+```{r PCA-PLOTS-1-GGPLOT2, fig.align='center'}
+
+#First, manually create a file called order.groups.csv. BOL2137SMinCn01 has an example
+
+#choose a color list from clist.
+gclist <- clist$colors00_23
+
+
+pca <- read.delim("PCA/PCA1.txt",skip = 2)
+pca2 <-read.delim("PCA/PCA2.txt",skip = 2)
+pca3 <-read.delim("PCA/PCA3.txt",skip = 0)
+# hist(pca3$Eigenvector4)
+
+
+pca$Taxa <- taxalabels
+order <- read.delim("order.groups.csv")
+#rearrange pca rows to be like order
+pca <- pca[match(order$taxa,pca$Taxa),]
+pca$group <- order$group00
+pca$color <- gclist[order$n00]
+#pca$color <- order$color
+  
+#now make the group color list
+gc <- order$color
+
+#ggp2test <- ggpairs(pca,columns=2:(ncol(pca)-2), cardinality_threshold=30) +# , mapping = ggplot2::aes(color = pca$group)) #+
+ggp2test <-
+  ggplot(data = pca3, mapping = aes(x = .panel_x, y = .panel_y)) + #, mapping = aes(x=PC1, y=PC2)) +
+  #geom_point(aes(x=PC1, y=PC2, color=group)) +
+  geom_point() +
+  #geom_point(aes(x = .panel_x, y = .panel_y, color =tree1,  group)) +
+  #ggtree(tree1, mapping  = aes(x = .panel_x, y = .panel_y, color = group)) +
+  #geom_autopoint() +
+  #theme_minimal() +
+  #geom_hline(yintercept = 0) +
+  #geom_vline(mapping=aes(x=.panel_x, y=.panel_y)) +
+  scale_colour_manual(values = gclist) +
+  # geom_vline(xintercept = 0) +
+  geom_autodensity() +
+  geom_density2d() +
+  facet_matrix(vars(c(Eigenvector1, Eigenvector2, Eigenvector3, Eigenvector4, Eigenvector5)), layer.diag = 2, layer.upper = 3, grid.y.diag = FALSE)
+  #facet_matrix(vars(everything()))
+#geom_abline(intercept = 0,slope=1)
+#geom_vline(xintercept = 0) +
+ggp2test
+```
+### PCA-plots-2-plotly
+```{r PCA-PLOTS-2-PLOTLY, fig.align='center'}
+
+#First, manually create a file called order.groups.csv. BOL2137SMinCn01 has an example
+
+#choose a color list from clist.
+gclist <- clist$colors00_24
+
+pca <- read.delim("PCA/PCA1.txt",skip = 2)
+pca2 <-read.delim("PCA/PCA2.txt",skip = 2)
+pca3 <-read.delim("PCA/PCA3.txt",skip = 0)
+# hist(pca3$Eigenvector4)
+
+pca$Taxa <- taxalabels
+order <- read.delim("order.groups.csv")
+#rearrange pca rows to be like order
+pca <- pca[match(order$taxa,pca$Taxa),]
+pca$group <- order$n00
+pca$color <- gclist[order$n00]
+
+#now make the group color list
+gc <- order$color
+
+axis = list(showline=FALSE,
+            zeroline=FALSE,
+            gridcolor=rgb(1,1,1), #'#ffff',
+            ticklen=0,
+            automargin = TRUE,
+            titlefont=list(size=13))
+
+figPCA <- pca %>%
+  plot_ly(    
+    height=1440,
+    width=1440
+    )
+  #add_markers(alpha = 0.5) %>%
+#   highlight("plotly_selected", dynamic = TRUE)
+# 
+# options(persistent = TRUE)
+# 
+# p <- datatable(pca)
+# 
+# bscols(widths = c(6, 4), figPCA, p)
+
+figPCA <- figPCA %>%
+  add_trace(
+    type = 'splom',
+    
+    dimensions = list(
+      list(label='PC1', values=~PC1),
+      list(label='PC2', values=~PC2),
+      list(label='PC3', values=~PC3),
+      list(label='PC4', values=~PC4),
+      list(label='PC5', values=~PC5)
+
+    ),
+    text=~Taxa,
+    diagonal=list(visible=F),
+    marker = list(
+      color = ~color,
+      #colors = clist,
+      size = 5,
+      line = list(
+        width = 1,
+        color = 'rgb(1,1,1)'
+      )
+    )
+  )
+
+figPCA <- figPCA %>%
+  layout(
+    title = "Scatterplot Matrix for PCA values",
+    hovermode='closest',
+    autosize = F,
+    dragmode = 'select',
+    plot_bgcolor='rgba(1,1,1, 0)',
+    xaxis=axis,#list(domain=NULL, showline=F, zeroline=F, gridcolor='#ffff', ticklen=2, titlefont=list(size=13)),
+    yaxis=axis,#list(domain=NULL, showline=F, zeroline=F, gridcolor='#ffff', ticklen=2, titlefont=list(size=13)),
+    xaxis2=axis,
+    xaxis3=axis,
+    xaxis4=axis,
+    xaxis5=axis,
+    yaxis2=axis,
+    yaxis3=axis,
+    yaxis4=axis,
+    yaxis5=axis
+
+  )
+figPCA <-  figPCA %>% style(showupperhalf = F)
+figPCA
+
+figPCAeig <-# pca3 %>%
+  plot_ly(
+    data = pca3,
+    height=1440,
+    width=1440
+    )
+figPCAeig <- figPCAeig %>%
+  add_trace(
+    type = 'splom',
+    
+    dimensions = list(
+      list(label='eig1', values=~Eigenvector1),
+      list(label='eig2', values=~Eigenvector2),
+      list(label='eig3', values=~Eigenvector3),
+      list(label='eig4', values=~Eigenvector4),
+      list(label='eig5', values=~Eigenvector5)
+
+    ),
+    text=~Trait,
+    diagonal=list(visible=F),
+    marker = list(
+      #color = ~color,
+      #colors = clist,
+      size = 5,
+      line = list(
+        width = 1,
+        color = 'rgb(1,1,1)'
+      )
+    )
+  )
+figPCAeig <- figPCAeig %>%
+  layout(
+    title = "Scatterplot Matrix for PCA eigenvectors",
+    hovermode='closest',
+    autosize = F,
+    dragmode = 'select',
+    plot_bgcolor='rgba(1,1,1, 0)',
+    xaxis=axis,#list(domain=NULL, showline=F, zeroline=F, gridcolor='#ffff', ticklen=2, titlefont=list(size=13)),
+    yaxis=axis,#list(domain=NULL, showline=F, zeroline=F, gridcolor='#ffff', ticklen=2, titlefont=list(size=13)),
+    xaxis2=axis,
+    xaxis3=axis,
+    xaxis4=axis,
+    xaxis5=axis,
+    yaxis2=axis,
+    yaxis3=axis,
+    yaxis4=axis,
+    yaxis5=axis
+
+  )
+figPCAeig <-  figPCAeig %>% style(showupperhalf = F)
+figPCAeig <- figPCAeig %>%
+  highlight("plotly_selected", dynamic = TRUE)
+
+
+options(persistent = TRUE)
+
+p <- datatable(pca3)
+
+bscols(widths = c(6, 4), figPCAeig, p)
+
+```
+### PCA-plots-3-shiny
+```{r PCA-PLOTS-3-SHINY + PLOTLY, eval=FALSE, echo=FALSE}
+library(shiny)
+library(plotly)
+
+df <- pca[c(2:6)]
+#df <- mtcars
+ui <- fluidPage(
+  headerPanel('PCA'),
+  sidebarPanel(
+    selectInput('xcol','X Variable', names(df)),
+    selectInput('ycol','Y Variable', names(df)),
+    selectInput('zcol','Z Variable', names(df)),
+    selected = names(df)[[2]]),
+  mainPanel(
+    plotlyOutput('plot')
+  )
+)
+
+server <- function(input, output) {
+  
+  x <- reactive({
+    df[,input$xcol]
+  })
+  
+  y <- reactive({
+    df[,input$ycol]
+  })
+  
+  z <- reactive({
+    df[,input$zcol]
+  })
+  pca$Taxa
+  output$plot <- renderPlotly(
+    plot8 <- plot_ly(
+      x = x(),
+      y = y(), 
+      z = z(),
+      name = pca$Taxa,
+      color = pca$Taxa, 
+      colors = gclist, 
+      hoverlabel = order$taxa,
+      height = 720,
+      width =1080,
+      type = 'scatter3d',
+      mode = 'markers')
+  )
+  
+}
+
+shinyApp(ui,server)
+```
+# PCA-plots-4-plotly
+```{r PCA-plots-4-plotly}
+```
+# Plot fastStructure
+
+```{r fastStructure, eval=FALSE}
+
+#setwd("BOL21afZAXA00/")
+
+#Make a list of paths and a list of .meanQ file names
+ffiles <- list.files("fastStructure", full.names=T, pattern = "*.meanQ")
+flist <- readQ(files=ffiles)
+
+#import the order of taxa saved in the phylo tree steps.
+tree.order.names <- read.delim("order.groups.csv",header = T)$taxa
+#sorts the taxa the same way for pop structure plots.
+tree.order.inds <- match(tree.order.names,taxalabels)
+
+flist <- sortQ(flist, "k")
+run.names <- attr(flist,which = "names")
+#if(length(unique(sapply(flist,nrow)))==1) flist <- lapply(flist,"rownames<-",taxalabels)
+if(length(unique(sapply(flist,nrow)))==1) flist <- lapply(flist,"rownames<-",make.names(order$labels[match(taxalabels, order$taxa)], unique = TRUE))
+indfun <- function(x) flist[[x]][tree.order.inds,]
+
+flist <- lapply(run.names,indfun)   #this line makes NA's.  fixing
+attr(flist, which="names") <- run.names
+
+lab1 <- data.frame(groups=order$group00)
+
+##Make the Plots!
+
+text.size <- 5
+
+kl <- length(flist)
+kl1 <- round(kl/2)
+kind1 <- 11#c(1:kl1)
+kind2 <- c((kl1+1):kl)
+
+IchooseK <- c(8:12)
+
+#uncomment this to pick your own values!
+#kind1 <- IchooseK
+
+fplotfilename1 <- "fplot1"
+fplotfilename2 <- "fplot2"
+
+fastStructurePlot1 <-
+  plotQ(
+    alignK(flist[kind1], type = "within"),
+    showlegend = T,
+    imgoutput = "sep",
+    splab = as.character(kind1 + 1),
+    showindlab = T,
+    useindlab = T,
+    showgrplab = T,
+    #indlabcol = pca$color,
+    grplab = lab1,
+    grplabpos = 1,
+    grplabjust = .5,
+    grplabangle = 90,
+    grplabsize = 1.5,
+    grplabheight = 5,
+    pointsize = 3,
+    #pointcol = ,
+    #pointbgcol = rgb(0, 1, 1),
+    #pointtype = 0,
+    pointalpha = .25,
+    linepos = 1,
+    linetype = 1,
+    returnplot = F,
+    exportplot = T,
+    basesize = text.size,
+    imgtype = "png",
+    exportpath = "images/",
+    height = 3,
+    width = 30,
+    sppos = "left",
+    dpi = 600,
+    outputfilename = fplotfilename1
+  )
+# fastStructurePlot1 <-
+#   plotQMultiline(
+#     alignK(flist[kind1], type = "across"),
+#     exportplot = T,
+#     returnplot = F,
+#     barsize = 1,
+#     #grplab = threelabset,
+#     ordergrp = T,
+#     exportpath = "images/",
+#     showtitle = T,
+#     showsubtitle = T,
+#     titlelab = "Structure plot",
+#     subtitlelab = "Population structure of my organism.",
+#     outputfilename = fplotfilename1
+#   )
+#grid.arrange(fastStructurePlot1$plot[[1]][[1]])
+
+#fastStructurePlot2 <- plotQ(alignK(flist[kind2], type = "across"), showlegend = T, imgoutput="join",splab = as.character(kind2+1), showindlab=T, useindlab=T, returnplot=T, exportplot=T,  basesize = text.size, imgtype="png", exportpath = "images/", height=2,width=44, sppos="left",dpi=600,outputfilename=fplotfilename2)
+
+#grid.arrange(fastStructurePlot1$plot[[1]])
+#grid.arrange(fastStructurePlot2$plot[[1]])
+#![Image Title](paste("images/",fplotfilename1,".pdf",sep="")){width=65%}
+
+#collect garbage to prevent imagemagick "out of memory" error
+gc()
+#import png
+fm1 <- image_read(paste("images/",fplotfilename1,".png",sep=""))
+#rotate png 90
+#image_rotate(fm1, 90) %>% image_write(paste(fplotfilename1,"rot90",".png",sep=""))
+
+#fm2 <- image_read(paste("images/",fplotfilename2,".png",sep=""))
+#image_rotate(fm1, 90) %>% image_write(paste("../../",fplotfilename2,"rot90",".png",sep=""))
+
+knitr::include_graphics(paste(fplotfilename1,"rot90",".png",sep=""))
+
+
+```
+
+##Combined Plots
+```{r tree and fastStructure 1}
+
+#p <- ggtree(tree, branch.length = "none") + 
+#  geom_tiplab() + theme(legend.position='none')
+
+#a <- runif(30, 0,1)
+#b <- 1 - a
+df1 <- as.matrix(flist$BOL2137SMinC.12)
+df <- melt(df1, id = 'Var1')
+p2 <-
+   tree1fw.1 + geom_facet(
+    panel = 'K=12',
+    #panel = 'fastStructure K=12',
+    data = df,
+    geom = geom_bar,
+    mapping = aes(x = value, fill = as.factor(Var2)),
+    orientation = 'y',
+    width = 1,
+    stat = 'identity'
+  ) +
+  theme(
+    panel.spacing = unit(0, "lines"),
+    legend.position = 'bottom',
+    legend.key.size = unit(.125, "in"),
+    legend.text = element_text(size = 4),
+    legend.title = element_text(size=0)
+  ) +
+  xlim_tree(1.5)
+
+fw1 <- facet_widths(p2, widths = c(7, 2))
+#fw1
+ggsave("tree-and-fs-1.pdf", plot = fw1, units = "in", width = 4, height = 10, dpi = 300)
+```
+
+```{r tree and fastStructure 2}
+
+#p <- ggtree(tree, branch.length = "none") + 
+#  geom_tiplab() + theme(legend.position='none')
+
+#a <- runif(30, 0,1)
+#b <- 1 - a
+df1 <- as.matrix(flist$BOL2137SMinC.12)
+df <- melt(df1, id = 'Var1')
+p2 <-
+   tree1fw.1 + geom_facet(
+    panel = 'K=12',
+    #panel = 'fastStructure K=12',
+    data = df,
+    geom = geom_bar,
+    mapping = aes(x = value, fill = as.factor(Var2)),
+    orientation = 'y',
+    width = 1,
+    stat = 'identity'
+  ) +
+  theme(
+    panel.spacing = unit(0, "lines"),
+    legend.position = 'bottom',
+    legend.key.size = unit(.125, "in"),
+    legend.text = element_text(size = 4),
+    legend.title = element_text(size=0)
+  ) +
+  xlim_tree(62)
+
+fw1 <- facet_widths(p2, widths = c(7, 2))
+#fw1
+ggsave("tree-and-fs-2.pdf", plot = fw1, units = "in", width = 4, height = 10, dpi = 300)
+```
+
+#PHENOTYPE-ANALYSES
+###setup
+```{r setup-pheno-data eval=FALSE}
+pheno <-
+	read.csv(file = "../../phenotype-data/pheno-final.csv",
+					 stringsAsFactors = FALSE,
+					 na.strings = "NA") 
+
+uniqgeno <- unique(pheno$geno)
+```
+
+###plots
+```{r setup-pheno-data eval=FALSE}
+#find a way to get subsets
+
+pca.brlr <- filter(pca, group %in% c(11:23))
+pca.brlr.pheno <- filter(brlr.pca,substr(Taxa,1,4) %in% uniqgeno)
+
+ggplot(data = pheno.brlr.pca, aes(x = MT, y = MT)) +
+  geom_point()
+
+```
+
+#TESTS-AND-REFERENCE
+```{r image-ref-for-in-text, eval=FALSE, echo = FALSE, message=FALSE, fig.align='center', fig.cap='Some cool caption', out.width='0.75\\linewidth', fig.pos='H'}
+#knitr::include_graphics(paste("./images/",fplotfilename1,".pdf",sep=""))
+#knitr::include_graphics(paste(fplotfilename1,".pdf",sep=""))
+knitr::include_graphics("fplot1.png")
+```

@@ -1,0 +1,96 @@
+---
+title: "GBS-analysis"
+author: "Sean O'Neill"
+date: "9/27/2021"
+output: html_document
+---
+```{css, echo=FALSE}
+body .main-container {
+  max-width: 1440px !important;
+  width: 1440px !important;
+  }
+  body {
+    max-width: 1440px !important;
+  }
+```
+
+```{r clear environment, eval=FALSE}
+rm(list=ls())
+getwd()
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#lapply(c("ape", "pophelper","plotly","ggplot2","gridExtra","knitr","label.switching","permute","rTASSEL","tidyr","remotes","dplyr","shiny"), install.packages, character.only = TRUE)
+
+lapply(c("ape", "pophelper","plotly","ggplot2","gridExtra","knitr","label.switching","permute","tidyr","remotes","dplyr","shiny"), library, character.only = TRUE)
+```
+
+```{r filter-PCA-PLINK}
+#setwd("..")
+getwd()
+RG <- c("BOL2")
+TREAT <- c("rwild33")
+#NAME <- c()
+OUT_NAME <- c(paste(RG,TREAT,sep=""))
+IN_DIR <- c("raw/GBS/")
+#OUT_DIR <- c(paste(OUT_NAME,NAME,"/",sep=""))
+TAXA <- c("taxa03.csv")
+MEM <- c("-Xmx25g")
+SMinC <- c("137")#,"91")
+txMinNOMIS <- c(".25")#,"0.5")
+SMinAF <- c(".1")#c("0.0625","0.125","0.25")
+MAXHET <- c(.25)#c("0.125","0.25","0.375")
+NOTES <- c("added more wild")
+KVALUES <- c(2:5)
+#KVALUES <- c(paste(2:15,collapse=" "))
+
+treatlist <- list(
+  RG = RG,
+  TREAT = TREAT,
+  OUT_NAME = OUT_NAME,
+  IN_DIR = IN_DIR,
+  TAXA = TAXA,
+  MEM = MEM,
+  SMinC = SMinC,
+  txMinNOMIS = txMinNOMIS,
+  SMinAF = SMinAF,
+  MAXHET = MAXHET,
+  NOTES = NOTES
+)
+
+#treats <- data.frame(txMinNOMIS=txMinNOMIS,SMinAF=SMinAF,MAXHET=MAXHET)
+treatsheet <- expand.grid(treatlist)
+
+treatsheet$NAME <- sprintf("%03d",as.integer(rownames(treatsheet)))
+
+treatsheet$OUT_DIR <- c(paste("output/",treatsheet$OUT_NAME,treatsheet$NAME,"/",sep=""))
+
+test <- list()
+for(i in 1:nrow(treatsheet)){
+  Sys.unsetenv(c("RG", "TREAT", "NAME", "IN_DIR", "OUT_DIR", "TAXA", "MEM", "txMinNOMIS", "SMinC", "SMinAF", "MAXHET", "NOTES"))
+  Sys.setenv(
+    RG=as.character(treatsheet$RG[i]), 
+    TREAT=as.character(treatsheet$TREAT[i]), 
+    NAME=as.character(treatsheet$NAME[i]), 
+    IN_DIR=as.character(treatsheet$IN_DIR[i]), 
+    OUT_DIR=as.character(treatsheet$OUT_DIR[i]), 
+    TAXA=as.character(treatsheet$TAXA[i]), 
+    MEM=as.character(treatsheet$MEM[i]), 
+    txMinNOMIS=as.character(treatsheet$txMinNOMIS[i]), 
+    SMinC=as.character(treatsheet$SMinC[i]), 
+    SMinAF=as.character(treatsheet$SMinAF[i]), 
+    MAXHET=as.character(treatsheet$MAXHET[i]), 
+    NOTES=as.character(treatsheet$NOTES[i])
+    )
+  #Sys.getenv()
+  #system("bash ./bin/shell/filtering.sh --RG=$RG --TREAT=$TREAT --NAME=$NAME --OUT_NAME=$OUT_NAME --IN_DIR=$IN_DIR --OUT_DIR=$OUT_DIR --TAXA=$TAXA --MEM=$MEM --SMinC=$SMinC --txMinNOMIS=$txMinNOMIS --SMinAF=$SMinAF --MAXHET=$MAXHET --NOTES=$NOTES")
+  for(j in KVALUES){
+  	Sys.setenv(K=as.character(j))
+  	j
+	  system("bash ./bin/shell/fastStructure.sh --OUT_DIR=$OUT_DIR --OUT_NAME=$RG$TREAT --KVALUES=$K")
+		
+  }
+  # #test[i] <- list(Sys.getenv())
+}
+```
